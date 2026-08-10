@@ -1,6 +1,12 @@
 mkvplex changelog
 =================
 
+0.13.1
+------
+- Fixed TV child-directory series inference for fused retail packaging labels such as BOXSET/BOX_SET/BOXED SET.
+- Added phrase-level handling for `complete series` and `complete collection` without treating bare `series` as junk.
+- Added a Mushi Shi BOXSET_D4 regression covering root-series bucket resolution.
+
 0.13.0
 ------
 - Refactored the ~400 KB single-file implementation into logical modules under particulars/.

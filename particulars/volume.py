@@ -66,6 +66,20 @@ def _series_title_component(name: str) -> str:
     work = re.sub(r"(?i)(?<!\d)(?:19|20|21)\d{2}(?!\d)", " ", work)
     work = re.sub(r"(?i)(?<![A-Za-z0-9])final[ ._-]*season(?![A-Za-z0-9])", " ", work)
     work = re.sub(r"(?i)(?<![A-Za-z0-9])(?:S|Season[ ._-]*)(?:0*\d{1,2})(?!\d)", " ", work)
+    # Packaging labels are often fused into one token by disc-authoring/ripping
+    # conventions (BOXSET, BOX_SET, Boxed-Set).  Strip the phrase before the
+    # per-word junk filter so a child such as MUSHI_SHI_BOXSET_D4 resolves back
+    # to the root show instead of being mistaken for a second series.
+    work = re.sub(
+        r"(?i)(?<![A-Za-z0-9])(?:boxed?[ ._-]*set|boxset)(?![A-Za-z0-9])",
+        " ", work,
+    )
+    # Likewise, remove packaging-only `complete series/collection` as a phrase;
+    # do not make bare `series` junk because it can be part of a real title.
+    work = re.sub(
+        r"(?i)(?<![A-Za-z0-9])complete[ ._-]*(?:series|collection)(?![A-Za-z0-9])",
+        " ", work,
+    )
     # Retail TV sets often use numbered packaging volumes that are unrelated
     # to the provider's season numbering, e.g. ``PINKY AND THE BRAIN VOL 2
     # DISC 1``.  Treat only an explicit numbered Vol/Volume marker as packaging

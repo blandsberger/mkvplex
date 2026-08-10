@@ -35,6 +35,27 @@ class MKVPlexRegressionTests(unittest.TestCase):
             self.assertEqual([g.episode_span for g in groups], [(1, 10), (11, 20), (21, 30), (31, 40)])
             self.assertEqual([m._series_title_component(g.directory.name) for g in groups], ['Rose of Versailles'] * 4)
 
+    def test_boxset_packaging_token_stays_with_root_series(self):
+        with tempfile.TemporaryDirectory() as td:
+            show = Path(td) / 'Mushi Shi'
+            disc = show / 'MUSHI_SHI_BOXSET_D4'
+            disc.mkdir(parents=True)
+            track = disc / 'H1_t04.mkv'
+            track.write_bytes(b'x')
+            group = m.TvRipGroup(disc, None, 4, False, (track,))
+
+            self.assertEqual(m._series_title_component(disc.name), 'MUSHI SHI')
+            self.assertEqual(m._group_series_query(show, 'Mushi Shi', group), 'Mushi Shi')
+            self.assertGreaterEqual(m.similarity('MUSHI SHI', 'Mushi Shi'), 0.88)
+
+        for label in (
+            'MUSHI_SHI_BOX_SET_D4',
+            'MUSHI SHI BOXED SET DISC 4',
+            'MUSHI_SHI_COMPLETE_SERIES_D4',
+            'MUSHI_SHI_COMPLETE_COLLECTION_D4',
+        ):
+            self.assertEqual(m._series_title_component(label), 'MUSHI SHI')
+
     def test_bad_range_shape_is_not_auto_tv(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / 'Thing'; root.mkdir()
