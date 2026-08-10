@@ -347,6 +347,60 @@ def infer_disc_slot_template(
     return result
 
 
+def isolated_numbered_disc_scope_issue(
+    groups: list[TvRipGroup],
+    candidates: list[TrackAnalysis],
+    episodes: list[Episode],
+    *,
+    explicit_episode_window: bool = False,
+) -> Optional[str]:
+    """Explain why a sparse standalone numbered disc cannot be globally positioned.
+
+    A directory named ``Disc 4`` tells us physical-disc identity, not which
+    provider episode ordinal begins that disc.  With sibling discs, authored
+    episode ranges, EPL ordinals, or strong filename/title evidence, other
+    planning paths can establish that position.  A lone weakly-named title
+    cannot: assigning it to episode 1 merely because episode 1 is the first
+    metadata row manufactures an identity.
+
+    An explicit --episode-start/--episode-count window is treated as user
+    supplied global positioning and therefore disables this guard.
+    """
+    if explicit_episode_window or len(groups) != 1 or not episodes:
+        return None
+    group = groups[0]
+    if group.disc is None or group.episode_span is not None:
+        return None
+    if not candidates or len(candidates) >= len(episodes):
+        return None
+    if any(epl_number(row.path) is not None for row in candidates):
+        return None
+    title_signal = max(
+        (episode_title_similarity(row.path, ep.title) for row in candidates for ep in episodes),
+        default=0.0,
+    )
+    if title_signal >= 0.85:
+        return None
+
+    nums = sorted({track_number(row.path)[0] for row in candidates if track_number(row.path)[0] < 10**9})
+    title_hint = ""
+    if nums:
+        shown = ", ".join(f"t{n:02d}" for n in nums[:6])
+        if len(nums) > 6:
+            shown += ", …"
+        title_hint = (
+            f" MakeMKV title number(s) {shown} are disc-local and do not establish "
+            "the disc's global season offset."
+        )
+    return (
+        f"isolated Disc {group.disc} contains {len(candidates)} episode-like title(s) for a "
+        f"{len(episodes)}-episode metadata window, but no sibling-disc layout, authored "
+        "episode range, EPL ordinal, or strong episode-title evidence establishes where this "
+        f"disc begins.{title_hint} Leave the source in place and provide an explicit "
+        "--episode-start/--episode-count window after identifying the disc contents."
+    )
+
+
 def infer_disc_slot_counts(
     groups: list[TvRipGroup],
     candidates: list[TrackAnalysis],
@@ -1031,4 +1085,4 @@ def looks_like_tv_tree(input_dir: Path) -> bool:
     return _validate_episode_range_corpus(range_rows, require_multiple=True)
 
 
-__all__ = ['analyze_tv_tracks', '_episode_candidate_rows', '_disc_section_label', 'classify_tv_disc_hypothesis', '_suspected_missing_track_numbers', 'infer_disc_slot_template', 'infer_disc_slot_counts', 'infer_complete_series_slot_counts', 'infer_track_number_direction', 'assign_disc_tracks', 'select_episode_manifest_by_ordinal_ranges', 'select_complete_series_manifest_discwise', 'select_episode_manifest_discwise', '_EPISODE_ORDINAL_RANGE_RE', 'episode_ordinal_span_from_name', '_episode_span_from_relative_path', '_validate_episode_range_corpus', '_hints_from_relative_path', 'find_tv_rip_groups', 'looks_like_tv_tree']
+__all__ = ['analyze_tv_tracks', '_episode_candidate_rows', '_disc_section_label', 'classify_tv_disc_hypothesis', '_suspected_missing_track_numbers', 'infer_disc_slot_template', 'isolated_numbered_disc_scope_issue', 'infer_disc_slot_counts', 'infer_complete_series_slot_counts', 'infer_track_number_direction', 'assign_disc_tracks', 'select_episode_manifest_by_ordinal_ranges', 'select_complete_series_manifest_discwise', 'select_episode_manifest_discwise', '_EPISODE_ORDINAL_RANGE_RE', 'episode_ordinal_span_from_name', '_episode_span_from_relative_path', '_validate_episode_range_corpus', '_hints_from_relative_path', 'find_tv_rip_groups', 'looks_like_tv_tree']

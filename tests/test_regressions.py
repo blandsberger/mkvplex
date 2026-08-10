@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,6 +36,113 @@ class MKVPlexRegressionTests(unittest.TestCase):
             self.assertEqual([g.episode_span for g in groups], [(1, 10), (11, 20), (21, 30), (31, 40)])
             self.assertEqual([m._series_title_component(g.directory.name) for g in groups], ['Rose of Versailles'] * 4)
 
+    def test_auto_retries_tv_only_when_movie_lookup_has_no_candidates(self):
+        class FakeCache:
+            path = Path('/synthetic/tmdb.sqlite3')
+
+        class FakeClient:
+            cache = FakeCache()
+            workers = 1
+            def stats_line(self):
+                return 'fake stats'
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / 'Rurouni Kenshin- Tsuioku-hen'
+            root.mkdir()
+            (root / 'Rurouni Kenshin- Tsuioku-hen_t00.mkv').write_bytes(b'x')
+            with (
+                mock.patch.object(cli_mod, 'TMDbClient', return_value=FakeClient()),
+                mock.patch.object(cli_mod, 'resolve_media_workers', return_value=(1, 'hdd')),
+                mock.patch.object(cli_mod, 'looks_like_tv_tree', return_value=False),
+                mock.patch.object(cli_mod, 'do_movie', side_effect=m.MKVPlexError("No movie matches found for 'Rurouni Kenshin Tsuioku hen'")) as movie,
+                mock.patch.object(cli_mod, 'do_tv', return_value=0) as tv,
+            ):
+                rc = cli_mod.main([
+                    'auto', str(root), str(Path(td) / 'Tv Shows'), str(Path(td) / 'Extras'), '--dry-run'
+                ])
+        self.assertEqual(rc, 0)
+        movie.assert_called_once()
+        tv.assert_called_once()
+
+    def test_localized_authored_subtitle_can_fall_back_to_parent_title(self):
+        variants = m.metadata_query_variants('Rurouni Kenshin: Tsuioku-hen')
+        self.assertEqual(variants[0], 'Rurouni Kenshin: Tsuioku-hen')
+        self.assertIn('Rurouni Kenshin', variants)
+        # The fallback is structural, not a translation dictionary.
+        self.assertNotIn('Rurouni Kenshin: Trust & Betrayal', variants)
+
+    def test_authored_title_fallback_surfaces_trust_and_betrayal_candidate(self):
+        class FakeClient:
+            def search_tv(self, query, year):
+                if m.normalize_for_match(query) != 'rurouni kenshin':
+                    return []
+                return [
+                    {'id': 210879, 'name': 'Rurouni Kenshin', 'first_air_date': '2023-07-07', 'popularity': 20},
+                    {'id': 28136, 'name': 'Rurouni Kenshin', 'first_air_date': '1996-01-10', 'popularity': 20},
+                    {'id': 313336, 'name': 'Rurouni Kenshin: Reflection', 'first_air_date': '2001-12-12', 'popularity': 5},
+                    {'id': 317885, 'name': 'Rurouni Kenshin: Trust & Betrayal', 'first_air_date': '1999-02-20', 'popularity': 5},
+                ]
+
+            def tv_bundle(self, tmdb_id):
+                return {}
+
+            def tv_external_ids(self, tmdb_id):
+                return {'imdb_id': 'tt0203082' if tmdb_id == 317885 else None}
+
+        group = m.TvRipGroup(
+            Path('/synthetic/Rurouni Kenshin- Tsuioku-hen'), None, None, False,
+            (Path('/synthetic/Rurouni Kenshin- Tsuioku-hen_t00.mkv'),),
+        )
+        old_probe = tv_mod.probe_container_title
+        try:
+            tv_mod.probe_container_title = lambda path: 'Rurouni Kenshin: Tsuioku-hen'
+            with mock.patch('builtins.input', return_value='4'):
+                match = tv_mod._choose_primary_tv_match(
+                    FakeClient(), 'Rurouni Kenshin Tsuioku hen', None, [group],
+                    explicit_imdb=None, assume_yes=False,
+                )
+        finally:
+            tv_mod.probe_container_title = old_probe
+
+        self.assertEqual(match.tmdb_id, 317885)
+        self.assertEqual(match.title, 'Rurouni Kenshin: Trust & Betrayal')
+        self.assertEqual(match.year, 1999)
+        self.assertEqual(match.imdb_id, 'tt0203082')
+
+    def test_trust_and_betrayal_four_part_authored_chapter_split(self):
+        root = Path('/synthetic/Rurouni Kenshin- Tsuioku-hen')
+        source = root / 'Rurouni Kenshin- Tsuioku-hen_t00.mkv'
+        group = m.TvRipGroup(root, 1, None, False, (source,))
+        analysis = m.TrackAnalysis(source, group, 7006.417, 35_600_000_000, 40.6)
+        episodes = [
+            m.Episode(1, 1, 'The Man of the Slashing Sword', 1, 29, 1999),
+            m.Episode(1, 2, 'The Lost Cat', 2, 29, 1999),
+            m.Episode(1, 3, 'The Previous Night at the Mountain Home', 3, 29, 1999),
+            m.Episode(1, 4, 'The Cross-Shaped Wound', 4, 29, 1999),
+        ]
+        chapter_points = [
+            405.154, 768.851, 938.520, 1195.569, 1421.211, 1617.449,
+            1707.706, 1730.729, 2328.367, 2502.541, 2737.359, 2936.016,
+            3383.380, 3481.478, 3967.004, 4486.565, 4629.249, 4844.172,
+            5237.232, 5942.770, 6510.504, 7004.998,
+        ]
+        old_probe = media_mod.probe_chapter_boundaries
+        old_fade = media_mod.detect_fade_boundary
+        try:
+            media_mod.probe_chapter_boundaries = lambda path, *, source_duration=None: chapter_points
+            media_mod.detect_fade_boundary = lambda *a, **kw: self.fail('authored chapter split should not need fade detection')
+            plans = m.build_aggregate_split_plans([(analysis, episodes)], show_runtime_minutes=29)
+        finally:
+            media_mod.probe_chapter_boundaries = old_probe
+            media_mod.detect_fade_boundary = old_fade
+
+        self.assertEqual(len(plans), 1)
+        selected = [boundary.selected for boundary in plans[0].boundaries]
+        for actual, expected in zip(selected, [1730.729, 3481.478, 5237.232, 7006.417]):
+            self.assertAlmostEqual(actual, expected, places=3)
+        self.assertEqual([ep.number for ep in plans[0].episodes], [1, 2, 3, 4])
+        self.assertTrue(all(not b.confidence.startswith('low') for b in plans[0].boundaries))
+
     def test_boxset_packaging_token_stays_with_root_series(self):
         with tempfile.TemporaryDirectory() as td:
             show = Path(td) / 'Mushi Shi'
@@ -55,6 +163,40 @@ class MKVPlexRegressionTests(unittest.TestCase):
             'MUSHI_SHI_COMPLETE_COLLECTION_D4',
         ):
             self.assertEqual(m._series_title_component(label), 'MUSHI SHI')
+
+    def test_isolated_numbered_disc_does_not_invent_global_episode_offset(self):
+        with tempfile.TemporaryDirectory() as td:
+            show = Path(td) / 'Mushi Shi'
+            disc = show / 'MUSHI_SHI_BOXSET_D4'
+            disc.mkdir(parents=True)
+            track = disc / 'H1_t04.mkv'
+            with track.open('wb') as f:
+                f.truncate(905561948)
+            group = m.TvRipGroup(disc, None, 4, False, (track,))
+            row = m.TrackAnalysis(track, group, 19 * 60 + 25, 905561948, 6.2)
+            episodes = [m.Episode(1, i, f'Episode {i}', i, 24, 2006) for i in range(1, 27)]
+
+            issue = m.isolated_numbered_disc_scope_issue([group], [row], episodes)
+            self.assertIsNotNone(issue)
+            self.assertIn('isolated Disc 4', issue)
+            self.assertIn('t04', issue)
+            self.assertIn('--episode-start/--episode-count', issue)
+
+            self.assertIsNone(m.isolated_numbered_disc_scope_issue(
+                [group], [row], episodes, explicit_episode_window=True
+            ))
+
+    def test_isolated_numbered_disc_with_strong_title_can_identify_episode(self):
+        with tempfile.TemporaryDirectory() as td:
+            disc = Path(td) / 'SHOW_D4'; disc.mkdir()
+            track = disc / 'The Sound of Rust_t04.mkv'; track.write_bytes(b'x')
+            group = m.TvRipGroup(disc, None, 4, False, (track,))
+            row = m.TrackAnalysis(track, group, 24 * 60, 1, 1.0)
+            episodes = [
+                m.Episode(1, 22, 'Shrine in the Sea', 22, 24, 2006),
+                m.Episode(1, 23, 'The Sound of Rust', 23, 24, 2006),
+            ]
+            self.assertIsNone(m.isolated_numbered_disc_scope_issue([group], [row], episodes))
 
     def test_bad_range_shape_is_not_auto_tv(self):
         with tempfile.TemporaryDirectory() as td:

@@ -27,8 +27,8 @@ from dataclasses import dataclass, replace
 from typing import Any, Iterable, Optional
 from .models import COMPLETE_SERIES_SENTINEL, MKVPlexError, Match, TvRipGroup
 from .discovery import discovery_db, remap_episode_seasons
-from .naming import normalize_for_match, parse_source_name, similarity
-from .media import _aggregate_complete_series_prefix_hint
+from .naming import canonical_spaces, normalize_for_match, parse_source_name, similarity
+from .media import _aggregate_complete_series_prefix_hint, probe_container_title
 from .discs import find_tv_rip_groups
 from .tmdb import TMDbClient, _regular_tv_season_rows, _show_runtime_minutes, attach_imdb_id, build_matches, choose_match, regular_series_episodes
 from .fsops import ensure_output_root, resolve_title_and_year
@@ -231,6 +231,66 @@ def _resolve_tv_series_buckets(
     return [row for row in buckets_by_id.values() if row[3]]
 
 
+
+def _authored_title_fallback(groups: list[TvRipGroup], parsed_query: str) -> Optional[str]:
+    """Return one consistent authored container title distinct from PARSED_QUERY.
+
+    The fallback is deliberately conservative: probe at most a few tracks and
+    use the title only when every non-empty authored title agrees.  This keeps
+    disc labels from a mixed tree from becoming a new guessed series identity.
+    """
+    titles: list[str] = []
+    for group in groups:
+        for path in group.tracks:
+            title = probe_container_title(path)
+            if title:
+                titles.append(title)
+            if len(titles) >= 4:
+                break
+        if len(titles) >= 4:
+            break
+    if not titles:
+        return None
+    first = titles[0]
+    first_norm = normalize_for_match(first)
+    if any(normalize_for_match(value) != first_norm for value in titles[1:]):
+        return None
+    # Punctuation can itself carry discovery structure (notably a colon that
+    # separates a localized subtitle), even when lexical normalization makes
+    # the strings equal.  Only suppress a truly identical authored label.
+    if canonical_spaces(first).casefold() == canonical_spaces(parsed_query).casefold():
+        return None
+    return first
+
+
+def _choose_primary_tv_match(
+    client: TMDbClient,
+    query: str,
+    year: Optional[int],
+    groups: list[TvRipGroup],
+    *,
+    explicit_imdb: Optional[str],
+    assume_yes: bool,
+) -> Match:
+    """Choose the primary TV identity, consulting authored title only on miss."""
+    try:
+        return choose_match(
+            client, "tv", query, year,
+            explicit_imdb=explicit_imdb, assume_yes=assume_yes,
+        )
+    except MKVPlexError as exc:
+        if not str(exc).startswith("No tv matches found for"):
+            raise
+        authored = _authored_title_fallback(groups, query)
+        if not authored:
+            raise
+        print(f"Authored media title fallback: {authored!r}")
+        return choose_match(
+            client, "tv", authored, year,
+            explicit_imdb=explicit_imdb, assume_yes=assume_yes,
+        )
+
+
 def do_tv(args: argparse.Namespace, client: TMDbClient) -> int:
     input_dir = Path(args.input).expanduser().resolve()
     output_root = ensure_output_root(Path(args.output))
@@ -256,8 +316,8 @@ def do_tv(args: argparse.Namespace, client: TMDbClient) -> int:
     else:
         print("Layout:   single TV rip directory")
 
-    primary_match = choose_match(
-        client, "tv", query, year,
+    primary_match = _choose_primary_tv_match(
+        client, query, year, groups,
         explicit_imdb=args.imdb,
         assume_yes=args.yes,
     )
@@ -608,4 +668,4 @@ def do_tv(args: argparse.Namespace, client: TMDbClient) -> int:
     return 0
 
 
-__all__ = ['_print_season_options', '_apply_unlabeled_season', '_infer_unlabeled_series_season', '_resolve_tv_series_buckets', 'do_tv']
+__all__ = ['_authored_title_fallback', '_choose_primary_tv_match', '_print_season_options', '_apply_unlabeled_season', '_infer_unlabeled_series_season', '_resolve_tv_series_buckets', 'do_tv']

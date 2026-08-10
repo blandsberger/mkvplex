@@ -183,6 +183,37 @@ def probe_duration_seconds(path: Path) -> float:
     return duration
 
 
+
+def probe_container_title(path: Path) -> Optional[str]:
+    """Return the authored container title, when present.
+
+    This is intentionally a tiny metadata-only probe used as a *fallback* for
+    provider discovery.  Filesystem names remain the primary identity source;
+    a container title is consulted only when the parsed title produced no
+    metadata candidates.  Failures return ``None`` rather than masking the
+    original provider lookup error.
+    """
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+    cmd = [
+        ffprobe, "-v", "error",
+        "-show_entries", "format_tags=title",
+        "-of", "json", str(path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20, check=False)
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+        title = str(((data.get("format") or {}).get("tags") or {}).get("title") or "").strip()
+    except Exception:
+        return None
+    return title or None
+
 def _rotational_flags_for_device(device: str) -> list[int]:
     """Return lsblk rotational flags for DEVICE and its backing devices."""
     lsblk = shutil.which("lsblk")
@@ -1660,4 +1691,4 @@ def playall_component_order_by_video(
     return ordered
 
 
-__all__ = ['probe_video_presentation', '_presentation_scan_component', '_presentation_resolution_component', 'technical_presentation_tag', 'technical_presentation_suffix', 'episode_filename', 'movie_filename', 'probe_duration_seconds', '_rotational_flags_for_device', 'detect_storage_class', 'resolve_media_workers', 'probe_durations', 'probe_chapter_boundaries', '_chapter_confidence', 'select_chapter_snaps', 'probe_black_intervals', '_boundary_confidence', 'detect_fade_boundary', '_aggregate_complete_series_prefix_hint', '_aggregate_episode_sources', 'select_aggregate_source_subset', 'aggregate_presentation_runtime_scale', 'allocate_episodes_to_aggregate_sources', '_runtime_resolve_aggregate_boundaries', 'build_aggregate_split_plans', '_split_segment_rows', 'execute_aggregate_split_plans', 'select_episode_tracks_by_epl', 'contiguous_epl_count', 'select_episode_tracks', 'probe_video_packet_fingerprint', 'probe_video_packet_fingerprints', '_presentation_stream_profile', '_packet_sample_hash_groups', '_scan_master_packet_hash_positions', '_component_master_anchor_times', 'playall_component_order_by_video']
+__all__ = ['probe_video_presentation', '_presentation_scan_component', '_presentation_resolution_component', 'technical_presentation_tag', 'technical_presentation_suffix', 'episode_filename', 'movie_filename', 'probe_duration_seconds', 'probe_container_title', '_rotational_flags_for_device', 'detect_storage_class', 'resolve_media_workers', 'probe_durations', 'probe_chapter_boundaries', '_chapter_confidence', 'select_chapter_snaps', 'probe_black_intervals', '_boundary_confidence', 'detect_fade_boundary', '_aggregate_complete_series_prefix_hint', '_aggregate_episode_sources', 'select_aggregate_source_subset', 'aggregate_presentation_runtime_scale', 'allocate_episodes_to_aggregate_sources', '_runtime_resolve_aggregate_boundaries', 'build_aggregate_split_plans', '_split_segment_rows', 'execute_aggregate_split_plans', 'select_episode_tracks_by_epl', 'contiguous_epl_count', 'select_episode_tracks', 'probe_video_packet_fingerprint', 'probe_video_packet_fingerprints', '_presentation_stream_profile', '_packet_sample_hash_groups', '_scan_master_packet_hash_positions', '_component_master_anchor_times', 'playall_component_order_by_video']

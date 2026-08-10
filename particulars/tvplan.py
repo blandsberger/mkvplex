@@ -30,7 +30,7 @@ from .common import _group_effective_season, _group_sort_key, _median, episode_e
 from .discovery import _plan_key, _tv_plan_settings, discovery_db, remap_episode_seasons
 from .naming import episode_match_confidence, epl_number, extras_group_directory, tv_directory_name
 from .media import _aggregate_episode_sources, _split_segment_rows, allocate_episodes_to_aggregate_sources, build_aggregate_split_plans, contiguous_epl_count, episode_filename, execute_aggregate_split_plans, probe_durations, select_aggregate_source_subset, select_episode_tracks, select_episode_tracks_by_epl
-from .discs import _episode_candidate_rows, analyze_tv_tracks, classify_tv_disc_hypothesis, infer_complete_series_slot_counts, infer_disc_slot_counts, infer_disc_slot_template, infer_track_number_direction, select_complete_series_manifest_discwise, select_episode_manifest_by_ordinal_ranges, select_episode_manifest_discwise
+from .discs import _episode_candidate_rows, analyze_tv_tracks, classify_tv_disc_hypothesis, infer_complete_series_slot_counts, infer_disc_slot_counts, infer_disc_slot_template, infer_track_number_direction, isolated_numbered_disc_scope_issue, select_complete_series_manifest_discwise, select_episode_manifest_by_ordinal_ranges, select_episode_manifest_discwise
 from .tmdb import TMDbClient, _show_runtime_minutes, regular_series_episodes, season_episodes
 from .fsops import _existing_destination_status, confirm, execute_plan, preflight_transfers, print_destination_conflicts, print_plan
 from .volume import assign_numbered_volume_plan, infer_numbered_volume_plan
@@ -463,6 +463,8 @@ def _do_tv_series(
     season_disc_hypotheses: dict[int, dict[Path, DiscHypothesis]] = {}
     season_bonus_groups: dict[int, set[Path]] = {}
     season_ambiguous_groups: dict[int, set[Path]] = {}
+    season_scope_issues: dict[int, str] = {}
+    unresolved_sources: list[tuple[Path, TvRipGroup, float, str]] = []
     aggregate_episode_mappings: list[tuple[AggregateSplitPlan, Episode, float, float, SplitBoundary]] = []
     all_split_plans: list[AggregateSplitPlan] = []
     volume_program_plan: Optional[dict[str, Any]] = None
@@ -937,6 +939,31 @@ def _do_tv_series(
                                 )
                                 season_skipped.append(SkippedTrack(row.path, row.group, row.duration, reason))
                     else:
+                        scope_issue = isolated_numbered_disc_scope_issue(
+                            episode_groups, episode_candidates, episode_list,
+                            explicit_episode_window=(
+                                args.episode_start != 1 or args.episode_count is not None
+                            ),
+                        )
+                        if scope_issue is not None:
+                            season_scope_issues[season] = scope_issue
+                            print(f"    isolated-disc scope unresolved: {scope_issue}")
+                            season_missing.extend(episode_list)
+                            for row in episode_analyses:
+                                unresolved_sources.append((
+                                    row.path, row.group, row.duration,
+                                    "isolated numbered disc; global episode offset unresolved",
+                                ))
+                            print(
+                                f"    matched 0 episode track(s); missing {len(season_missing)}; "
+                                f"archived 0; left {len(episode_analyses)} source track(s) untouched"
+                            )
+                            # Do not map or archive any title from an unresolved physical disc.
+                            # The source remains exactly where it is until the user supplies a
+                            # globally-positioned episode window.  Record the holes now because
+                            # this branch intentionally skips the normal season-finalization path.
+                            missing_manifest.extend(season_missing)
+                            continue
                         if complete_series_mode:
                             slot_counts, slot_source = infer_complete_series_slot_counts(
                                 episode_groups, episode_candidates, len(episode_list)
@@ -1145,6 +1172,13 @@ def _do_tv_series(
             print(f"    {src.name:<28} [{format_duration(duration)}] [{reason}] -> {destination}")
         print(f"  {len(extras_mappings)} skipped track(s) will be archived, not deleted.")
 
+    if unresolved_sources:
+        print()
+        print("Unresolved source tracks (left in place):")
+        for src, group, duration, reason in unresolved_sources:
+            rel = group.directory.relative_to(input_dir) if group.directory != input_dir else Path(".")
+            print(f"  [{rel}] {src.name} [{format_duration(duration)}] -- {reason}")
+
     print_plan(match, transfers, destination_dir, args.mode, "COPY" if args.copy else "MOVE")
     split_destinations: list[Path] = []
     if all_split_plans:
@@ -1185,6 +1219,11 @@ def _do_tv_series(
         raise MKVPlexError(
             "Aggregate split review required before execution; low-confidence/unresolved "
             f"split boundaries remain in: {names}. Use --dry-run to inspect the plan."
+        )
+    if season_scope_issues and not args.dry_run:
+        details = "; ".join(season_scope_issues[season] for season in sorted(season_scope_issues))
+        raise MKVPlexError(
+            "Isolated numbered-disc episode scope is unresolved; refusing execution. " + details
         )
 
     tv_action = "COPY" if args.copy else "MOVE"
@@ -1241,6 +1280,8 @@ def _do_tv_series(
         blocker_messages.append(f"{len(destination_conflicts)} destination conflict(s)")
     if ambiguous_disc_count:
         blocker_messages.append(f"{ambiguous_disc_count} ambiguous disc classification(s)")
+    if season_scope_issues:
+        blocker_messages.append(f"{len(season_scope_issues)} isolated numbered-disc scope ambiguity/ambiguities")
     if split_boundary_unresolved:
         blocker_messages.append(f"{split_boundary_unresolved} unresolved split boundary/boundaries")
     if split_boundary_low:

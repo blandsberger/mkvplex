@@ -1,6 +1,19 @@
 mkvplex changelog
 =================
 
+0.13.3
+------
+- Added authored Matroska container-title fallback when a parsed TV title has no TMDb matches.
+- Added conservative parent-title discovery for explicit subtitle separators without translating/localizing subtitle text.
+- In auto mode, retry TV discovery only when movie metadata lookup returns no candidates.
+- Added Rurouni Kenshin: Tsuioku-hen / Trust & Betrayal regressions for discovery and four-part authored-chapter splitting.
+
+0.13.2
+------
+- Fail closed on sparse isolated numbered TV discs when no evidence establishes the disc's global episode offset.
+- Leave unresolved source tracks in place instead of mapping them to episode 1 or archiving them as extras.
+- Added Mushi Shi Disc 4 regressions for the H1_t04 partial-rip case and strong-title escape hatch.
+
 0.13.1
 ------
 - Fixed TV child-directory series inference for fused retail packaging labels such as BOXSET/BOX_SET/BOXED SET.

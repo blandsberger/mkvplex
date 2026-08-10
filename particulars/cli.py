@@ -349,7 +349,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             ):
                 result = do_tv(args, client)
             else:
-                result = do_movie(args, client)
+                try:
+                    result = do_movie(args, client)
+                except MKVPlexError as exc:
+                    if not str(exc).startswith("No movie matches found for"):
+                        raise
+                    if not getattr(args, "extras", None):
+                        raise
+                    print("Auto: movie metadata lookup found no match; trying TV discovery.")
+                    result = do_tv(args, client)
         else:
             parser.error("unknown command")
             return 2

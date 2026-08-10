@@ -94,6 +94,17 @@ def metadata_query_variants(query: str) -> list[str]:
     )
     add(stripped_collection)
 
+    # Authored/localized titles often carry a subtitle that has no lexical
+    # relationship to the provider's English release title.  When the source
+    # itself preserves an explicit subtitle separator, search the parent title
+    # as a low-priority discovery fallback rather than attempting translation.
+    # Example shape: ``Franchise: Localized Subtitle`` -> ``Franchise``.
+    # Do not progressively drop arbitrary trailing words.
+    for base in list(variants):
+        parent = re.split(r"\s*[:：]\s*", base, maxsplit=1)[0].strip()
+        if parent and normalize_for_match(parent) != normalize_for_match(base):
+            add(parent)
+
     # A surprisingly common release-label mismatch is singular/plural drift in
     # the leading noun of an ``X of the Y`` title.  For example, retail/rip
     # labels may say ``Legends Of The Galactic Heroes`` while the provider
