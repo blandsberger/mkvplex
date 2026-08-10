@@ -326,8 +326,8 @@ def do_tv(args: argparse.Namespace, client: TMDbClient) -> int:
     # multiple physical rip directories (or a nested rip directory below the
     # supplied root).  For a single rip directory the selected root identity is
     # authoritative.  Re-running the directory-name heuristic here can invent a
-    # bogus secondary title from labels such as ``QAF_Disc3 130306`` even when
-    # --title/--imdb already resolved the show correctly.
+    # bogus secondary title from labels such as even when --title/--imdb already
+    # resolved the show correctly.
     if tree_mode:
         buckets = _resolve_tv_series_buckets(
             args, client, input_dir, query, year, groups, primary_match

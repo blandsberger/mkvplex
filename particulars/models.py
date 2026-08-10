@@ -26,7 +26,7 @@ import urllib.request
 from dataclasses import dataclass, replace
 from typing import Any, Iterable, Optional
 
-VERSION = "0.13.1"
+VERSION = "0.13.3"
 
 
 DISCOVERY_SCHEMA = 16
