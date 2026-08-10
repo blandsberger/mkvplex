@@ -1,0 +1,40 @@
+mkvplex changelog
+=================
+
+0.13.0
+------
+- Refactored the ~400 KB single-file implementation into logical modules under particulars/.
+- Added a thin root main.py entry point and package compatibility facade.
+- Separated models/state, naming, media probing/splitting, disc inference, TMDb, filesystem operations, movie, collection, retail-volume, TV planning, TV orchestration, and CLI concerns.
+- Preserved discovery schema 16; version change intentionally invalidates version-bound dry-run approvals, so generate a fresh dry run before execution.
+- Added GitHub-facing README.md, compact README.txt, and packaged regression tests.
+
+0.12.9
+------
+- Added authored MKV chapter-topology refinement for numbered retail-volume program alignment.
+- Allowed decisive same-disc adjacent identity correction when multipart metadata and authored boundaries disagree.
+- Pinky and the Brain Volume 2: resolves D3 as Brain Noir and D4 as Larry / Mousealopes from source evidence.
+
+0.12.8
+------
+- Added chronological air-date ordering as a retail-volume metadata fallback.
+
+0.12.7
+------
+- Added partial-volume support for usable TMDb DVD episode-group ordering while keeping complete-series ordering strict.
+
+0.12.6
+------
+- Added play-all master content-order discovery using encoded video packet fingerprints and persistent DB caching.
+
+0.12.5
+------
+- Corrected numbered retail-volume boundary placement using observed volume width.
+
+0.12.4
+------
+- Added generic numbered retail-volume structural analysis, physical program-unit mapping, multi-segment splitting, and bonus/master archival.
+
+0.12.3
+------
+- Treated numbered retail-volume labels as packaging metadata rather than series identity.
